@@ -53,7 +53,7 @@ float print_line(float tab_origin, float x, float y, const char *msg, int msg_le
 		return 0;
 	if(!text_vertices)
 		ARRAY_ALLOC(float[4], text_vertices, 0, 0, 256, 0);
-	float rect[4]={0};
+	float rect[4]={0};//{x1, y1, x2, y2}
 	QuadCoords *txc=0;
 	//if(sdf_active)
 	//	zoom*=16.f/sdf_txh;

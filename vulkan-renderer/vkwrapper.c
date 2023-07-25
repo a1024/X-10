@@ -26,7 +26,8 @@ Region const *const currentregion=&region;
 
 static VkInstance instance=0;
 #ifdef ENABLE_VALIDATION
-static const int messageseverity=VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+static const int validation_loglevel=VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+static int validation_disableabort=0;
 static VkDebugUtilsMessengerEXT messenger=0;
 #endif
 static VkPhysicalDevice physicaldevice=0;
@@ -183,7 +184,9 @@ const char* vkerror2str(int error)
 #define CHECKVK(E) (!(E)||LOG_ERROR(vkerror2str(E)))
 static VkBool32 VKAPI_CALL debugcallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT *callbackdata, void *pUserData)
 {
-	//if(messageSeverity>=messageseverity)
+	if(validation_disableabort)//don't print that we got outside the empty extent range of min = max = original resolution
+		return 0;
+	//if(messageSeverity>=validation_loglevel)
 	{
 		const char *severity=0, *type=0;
 		switch(messageSeverity)
@@ -203,7 +206,7 @@ static VkBool32 VKAPI_CALL debugcallback(VkDebugUtilsMessageSeverityFlagBitsEXT 
 		printf("Validation %s %s:\t", type, severity);
 		printf("%s\n", callbackdata->pMessage);
 
-		if(messageSeverity==VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+		if(!validation_disableabort&&messageSeverity>=VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 			LOG_ERROR("Aborting\n\n%s", callbackdata->pMessage);
 	}
 	return VK_FALSE;
@@ -1094,13 +1097,15 @@ static int create_swapchain(int w, int h)//also creates image views
 			presentmode=VK_PRESENT_MODE_FIFO_KHR;
 	}
 
-	if(swapsupport.capabilities.currentExtent.width!=(unsigned)-1)
-		extent=swapsupport.capabilities.currentExtent;
-	else
-	{
-		extent.width=CLAMP(swapsupport.capabilities.minImageExtent.width, (unsigned)w, swapsupport.capabilities.maxImageExtent.width);
-		extent.height=CLAMP(swapsupport.capabilities.minImageExtent.height, (unsigned)h, swapsupport.capabilities.maxImageExtent.height);
-	}
+	extent.width=w;
+	extent.height=h;
+	//if(swapsupport.capabilities.currentExtent.width!=(unsigned)-1)
+	//	extent=swapsupport.capabilities.currentExtent;
+	//else
+	//{
+	//	extent.width=CLAMP(swapsupport.capabilities.minImageExtent.width, (unsigned)w, swapsupport.capabilities.maxImageExtent.width);
+	//	extent.height=CLAMP(swapsupport.capabilities.minImageExtent.height, (unsigned)h, swapsupport.capabilities.maxImageExtent.height);
+	//}
 	unsigned imagecount=swapsupport.capabilities.minImageCount+1;
 	if(swapsupport.capabilities.maxImageCount&&imagecount>swapsupport.capabilities.maxImageCount)
 		imagecount=swapsupport.capabilities.maxImageCount;
@@ -1128,7 +1133,13 @@ static int create_swapchain(int w, int h)//also creates image views
 		VK_TRUE,//clipped
 		VK_NULL_HANDLE,//old swapchain
 	};
+#ifdef ENABLE_VALIDATION
+	validation_disableabort=1;
+#endif
 	error=vkCreateSwapchainKHR(device, &swapchaincreateinfo, 0, &swapchain);	CHECKVK(error);
+#ifdef ENABLE_VALIDATION
+	validation_disableabort=0;
+#endif
 
 	vkGetSwapchainImagesKHR(device, swapchain, &count, 0);
 	if(images)
@@ -1170,6 +1181,18 @@ static int create_swapchain(int w, int h)//also creates image views
 		error=vkCreateImageView(device, &createinfo, 0, imageview);
 #endif
 	}
+	
+	viewport.x=0;
+	viewport.y=0;
+	viewport.width=(float)extent.width;
+	viewport.height=(float)extent.height;
+	viewport.minDepth=0;
+	viewport.maxDepth=1;
+	scissor.offset.x=0;
+	scissor.offset.y=0;
+	scissor.extent=extent;
+	memcpy(&region, &viewport, sizeof(float[4]));
+	memcpy((float*)&region+4, &scissor, sizeof(scissor));
 	return 1;
 }
 static void create_framebuffers()//also creates color resources & depth resources
@@ -1252,6 +1275,10 @@ static void recreate_swapchain()
 
 	create_swapchain(w, h);
 	create_framebuffers();
+
+	//for(int k=0;k<1000;++k)//
+	//io_render();
+	//io_render();
 }
 
 void print_text(VkCommandBuffer cmdbuf)
@@ -2123,7 +2150,9 @@ int vkw_init(const char *searchpath, Texture *atlas, Texture *texture, ArrayHand
 		{
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAXFRAMESINFLIGHT},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAXFRAMESINFLIGHT},
+#ifdef ENABLE_COMPUTE
 			{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAXFRAMESINFLIGHT*2},
+#endif
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAXFRAMESINFLIGHT},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAXFRAMESINFLIGHT},
 		};
@@ -2308,7 +2337,7 @@ int vkw_init(const char *searchpath, Texture *atlas, Texture *texture, ArrayHand
 	//initialize text style
 	set_textcolor(0xFF000000);
 	set_textbk(0xFFFFFFFF);
-	set_textzoom(1);
+	set_textzoom(10);
 
 	//GUIPrint(0, 100, 100, "Hello");
 
@@ -2364,7 +2393,7 @@ int vkw_render()
 		error=vkAcquireNextImageKHR(device, swapchain, timeout_ns, imageavailablesemaphores[currentframe], VK_NULL_HANDLE, &imageidx);//timeout is in nanoseconds
 		if(error==VK_ERROR_OUT_OF_DATE_KHR)
 		{
-			recreate_swapchain();
+			//recreate_swapchain();
 			return 1;
 		}
 		if(error!=VK_SUBOPTIMAL_KHR)
@@ -2464,9 +2493,9 @@ int vkw_render()
 		error=vkQueuePresentKHR(presentqueue, &presentinfo);
 		if(error==VK_ERROR_OUT_OF_DATE_KHR||error==VK_SUBOPTIMAL_KHR||resized)
 		{
-			//printf("vkQueuePresentKHR(): %s, resized %d\n", vkerror2str(error), resized);
+			printf("vkQueuePresentKHR(): %s, resized %d\n", vkerror2str(error), resized);
 			resized=0;
-			recreate_swapchain();
+			//recreate_swapchain();
 		}
 		else
 			CHECKVK(error);//error handling not necessary here
@@ -2478,7 +2507,8 @@ int vkw_render()
 }
 int vkw_resize(int w, int h)
 {
-	resized=1;
+	recreate_swapchain();
+	//resized=1;
 	//recreate_swapchain();
 	return 1;
 }
